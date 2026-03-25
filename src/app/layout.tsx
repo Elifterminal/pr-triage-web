@@ -5,8 +5,14 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'PR Triage — Stop reviewing junk PRs',
+  title: {
+    default: 'PR Triage — Stop reviewing junk PRs',
+    template: '%s | PR Triage',
+  },
   description: 'AI-powered pull request evaluation for open source maintainers. Get a confidence score and structured reasoning before you review.',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({

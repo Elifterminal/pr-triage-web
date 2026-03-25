@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
@@ -10,6 +11,7 @@ import { FeedbackButtons } from '@/components/feedback-buttons';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { CopySummary } from '@/components/copy-summary';
 import type { TriageResult } from '@/engine/types';
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -20,6 +22,16 @@ const DIMENSION_LABELS: Record<string, string> = {
   test_signal: 'Test Signal',
   risk_flags: 'Risk Flags',
 };
+
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+  const analysis = await db.analysis.findUnique({
+    where: { id: params.id },
+    select: { prTitle: true, prOwner: true, prRepo: true, prNumber: true },
+  });
+  if (!analysis) return { title: 'Analysis' };
+  const label = analysis.prTitle || `${analysis.prOwner}/${analysis.prRepo}#${analysis.prNumber}`;
+  return { title: label };
+}
 
 export default async function AnalysisDetailPage({
   params,
@@ -75,7 +87,13 @@ export default async function AnalysisDetailPage({
     );
   }
 
-  const result = analysis.resultData ? JSON.parse(analysis.resultData as string) as TriageResult : null;
+  const rawResult = analysis.resultData ? JSON.parse(analysis.resultData as string) as TriageResult : null;
+  // Normalize legacy action names (IGNORE → CLOSE)
+  const result = rawResult ? {
+    ...rawResult,
+    action: (rawResult.action as string) === 'IGNORE' ? 'CLOSE' : rawResult.action,
+    recommendation: (rawResult.recommendation as string) === 'IGNORE' ? 'CLOSE' : rawResult.recommendation,
+  } as TriageResult : null;
   const userFeedback = (analysis.feedback[0]?.feedbackType as 'AGREE' | 'DISAGREE') || null;
 
   // Derive guidance signals from result data
@@ -122,14 +140,25 @@ export default async function AnalysisDetailPage({
             </Badge>
           </div>
         </div>
-        <a
-          href={analysis.prUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-muted-foreground hover:text-foreground transition"
-        >
-          View on GitHub &#8599;
-        </a>
+        <div className="flex items-center gap-3">
+          {result?.executiveSummary && (
+            <CopySummary
+              score={analysis.compositeScore || 0}
+              action={result.action || 'NEEDS_HUMAN_JUDGMENT'}
+              confidence={analysis.confidenceLevel || 'MODERATE'}
+              summary={result.executiveSummary}
+              prUrl={analysis.prUrl}
+            />
+          )}
+          <a
+            href={analysis.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-foreground transition"
+          >
+            View on GitHub &#8599;
+          </a>
+        </div>
       </div>
 
       {/* Score */}
@@ -171,25 +200,6 @@ export default async function AnalysisDetailPage({
             </p>
           </CardContent>
         </Card>
-      )}
-
-      {/* Dimensions */}
-      {result?.dimensions && result.dimensions.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Dimension Scores</h2>
-          <div className="grid gap-3">
-            {result.dimensions.map((dim) => (
-              <DimensionBand
-                key={dim.key}
-                name={DIMENSION_LABELS[dim.key] || dim.name}
-                band={dim.band}
-                weight={dim.weight}
-                reasoning={dim.reasoning}
-                evidence={dim.evidence}
-              />
-            ))}
-          </div>
-        </div>
       )}
 
       {/* Risk flags */}
@@ -269,6 +279,25 @@ export default async function AnalysisDetailPage({
           </Card>
         )}
       </div>
+
+      {/* Dimensions */}
+      {result?.dimensions && result.dimensions.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-lg font-semibold">Dimension Scores</h2>
+          <div className="grid gap-3">
+            {result.dimensions.map((dim) => (
+              <DimensionBand
+                key={dim.key}
+                name={DIMENSION_LABELS[dim.key] || dim.name}
+                band={dim.band}
+                weight={dim.weight}
+                reasoning={dim.reasoning}
+                evidence={dim.evidence}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* What to verify */}
       {result?.whatToVerify && result.whatToVerify.length > 0 && (

@@ -40,16 +40,16 @@ function deriveGuidance({
   const strengths = topStrengths || [];
 
   // === IGNORE: Definitive rejection with cause ===
-  if (action === 'IGNORE') {
+  if (action === 'CLOSE') {
     const cause = riskSummary || (concerns.length > 0 ? concerns[0] : null);
     if (cause) {
       return {
-        statement: `This PR can be safely ignored: ${pickReason([cause], '')}.`,
+        statement: `Close this PR: ${pickReason([cause], '')}.`,
         rationale: concerns.length > 1 ? concerns.slice(1, 3).join('. ').replace(/\.$/, '') + '.' : undefined,
       };
     }
     return {
-      statement: 'This PR does not appear to merit review and can be safely ignored.',
+      statement: 'Close this PR — it does not appear to merit review.',
     };
   }
 

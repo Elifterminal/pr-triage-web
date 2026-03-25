@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
@@ -7,17 +8,20 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { getTierLimits, TIER_LABELS, type PlanTier } from '@/lib/tiers';
 
+export const metadata: Metadata = { title: 'Dashboard' };
+
 const ACTION_LABELS: Record<string, { label: string; variant: 'success' | 'info' | 'warning' | 'danger' | 'secondary' }> = {
-  PRIORITIZE: { label: 'Prioritize', variant: 'success' },
+  PRIORITIZE: { label: 'Merge', variant: 'success' },
   REVIEW: { label: 'Review', variant: 'info' },
-  BATCH: { label: 'Batch', variant: 'secondary' },
-  IGNORE: { label: 'Ignore', variant: 'danger' },
+  BATCH: { label: 'Low Priority', variant: 'secondary' },
+  CLOSE: { label: 'Close', variant: 'danger' },
   NEEDS_HUMAN_JUDGMENT: { label: 'Needs Judgment', variant: 'warning' },
   // Legacy compat
-  REVIEW_NOW: { label: 'Prioritize', variant: 'success' },
+  IGNORE: { label: 'Close', variant: 'danger' },
+  REVIEW_NOW: { label: 'Merge', variant: 'success' },
   REVIEW_SOON: { label: 'Review', variant: 'info' },
-  LOW_PRIORITY: { label: 'Batch', variant: 'secondary' },
-  LIKELY_NOT_WORTH_REVIEW: { label: 'Ignore', variant: 'danger' },
+  LOW_PRIORITY: { label: 'Low Priority', variant: 'secondary' },
+  LIKELY_NOT_WORTH_REVIEW: { label: 'Close', variant: 'danger' },
 };
 
 function getScoreColor(score: number): string {
@@ -38,18 +42,28 @@ function timeAgo(date: Date): string {
   return `${days}d ago`;
 }
 
-export default async function DashboardPage() {
+const PAGE_SIZE = 10;
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: { page?: string };
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
+
+  const currentPage = Math.max(1, parseInt(searchParams.page || '1', 10) || 1);
+  const skip = (currentPage - 1) * PAGE_SIZE;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const [recentAnalyses, stats, hasApiKey, userRecord, todayCount] = await Promise.all([
+  const [recentAnalyses, totalAll, totalCount, actionBreakdown, hasApiKey, userRecord, todayCount] = await Promise.all([
     db.analysis.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: PAGE_SIZE,
+      skip,
       select: {
         id: true,
         prUrl: true,
@@ -63,10 +77,16 @@ export default async function DashboardPage() {
         createdAt: true,
       },
     }),
-    db.analysis.aggregate({
+    db.analysis.count({
+      where: { userId: session.user.id },
+    }),
+    db.analysis.count({
+      where: { userId: session.user.id, status: 'COMPLETE' },
+    }),
+    db.analysis.groupBy({
+      by: ['recommendation'],
       where: { userId: session.user.id, status: 'COMPLETE' },
       _count: true,
-      _avg: { compositeScore: true },
     }),
     db.apiKey.findFirst({
       where: { userId: session.user.id },
@@ -86,10 +106,23 @@ export default async function DashboardPage() {
 
   const plan = (userRecord?.plan || 'FREE') as PlanTier;
   const tierLimits = getTierLimits(plan);
-  const totalAnalyses = stats._count;
-  const avgScore = stats._avg.compositeScore
-    ? Math.round(stats._avg.compositeScore)
-    : null;
+  const totalAnalyses = totalCount;
+  const totalPages = Math.ceil(totalAll / PAGE_SIZE);
+  const hasPrev = currentPage > 1;
+  const hasNext = currentPage < totalPages;
+
+  // Build action breakdown: normalize legacy names and count
+  const actionCounts: Record<string, number> = {};
+  for (const group of actionBreakdown) {
+    const rec = group.recommendation || 'UNKNOWN';
+    // Normalize legacy names
+    const normalized = rec === 'IGNORE' ? 'CLOSE' : rec === 'REVIEW_NOW' ? 'PRIORITIZE' : rec === 'REVIEW_SOON' ? 'REVIEW' : rec === 'LOW_PRIORITY' ? 'BATCH' : rec === 'LIKELY_NOT_WORTH_REVIEW' ? 'CLOSE' : rec;
+    actionCounts[normalized] = (actionCounts[normalized] || 0) + group._count;
+  }
+  const closeCount = (actionCounts['CLOSE'] || 0);
+  const mergeCount = (actionCounts['PRIORITIZE'] || 0);
+  const reviewCount = (actionCounts['REVIEW'] || 0) + (actionCounts['NEEDS_HUMAN_JUDGMENT'] || 0);
+  const batchCount = (actionCounts['BATCH'] || 0);
 
   return (
     <div className="space-y-8">
@@ -142,13 +175,21 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Average Score
+              Triage Breakdown
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-3xl font-bold ${avgScore ? getScoreColor(avgScore) : ''}`}>
-              {avgScore !== null ? avgScore : '—'}
-            </div>
+            {totalAnalyses > 0 ? (
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-green-400 font-semibold">{mergeCount} merge</span>
+                <span className="text-muted-foreground">/</span>
+                <span className="text-blue-400 font-semibold">{reviewCount} review</span>
+                <span className="text-muted-foreground">/</span>
+                <span className="text-red-400 font-semibold">{closeCount} close</span>
+              </div>
+            ) : (
+              <div className="text-3xl font-bold">—</div>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -172,7 +213,16 @@ export default async function DashboardPage() {
 
       {/* Recent analyses */}
       <div>
-        <h2 className="text-lg font-semibold mb-4">Recent Analyses</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">
+            {currentPage === 1 ? 'Recent Analyses' : `Analyses — Page ${currentPage}`}
+          </h2>
+          {totalAll > PAGE_SIZE && (
+            <span className="text-xs text-muted-foreground">
+              {skip + 1}–{Math.min(skip + PAGE_SIZE, totalAll)} of {totalAll}
+            </span>
+          )}
+        </div>
         {recentAnalyses.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
@@ -234,6 +284,26 @@ export default async function DashboardPage() {
                 </Link>
               );
             })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between mt-4">
+            {hasPrev ? (
+              <Link href={`/dashboard${currentPage > 2 ? `?page=${currentPage - 1}` : ''}`}>
+                <Button variant="outline" size="sm">&#8592; Newer</Button>
+              </Link>
+            ) : (
+              <div />
+            )}
+            {hasNext ? (
+              <Link href={`/dashboard?page=${currentPage + 1}`}>
+                <Button variant="outline" size="sm">Older &#8594;</Button>
+              </Link>
+            ) : (
+              <div />
+            )}
           </div>
         )}
       </div>

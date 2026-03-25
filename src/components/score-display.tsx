@@ -15,10 +15,10 @@ const ACTION_CONFIG: Record<string, {
   label: string;
   badgeVariant: 'success' | 'warning' | 'danger' | 'info' | 'secondary';
 }> = {
-  PRIORITIZE: { label: 'Prioritize', badgeVariant: 'success' },
+  PRIORITIZE: { label: 'Merge', badgeVariant: 'success' },
   REVIEW: { label: 'Review', badgeVariant: 'info' },
-  BATCH: { label: 'Batch', badgeVariant: 'secondary' },
-  IGNORE: { label: 'Ignore', badgeVariant: 'danger' },
+  BATCH: { label: 'Low Priority', badgeVariant: 'secondary' },
+  CLOSE: { label: 'Close', badgeVariant: 'danger' },
   NEEDS_HUMAN_JUDGMENT: { label: 'Needs Human Judgment', badgeVariant: 'warning' },
 };
 

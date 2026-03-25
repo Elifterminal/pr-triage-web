@@ -73,6 +73,24 @@ export async function POST(req: NextRequest) {
 
   const apiKey = decrypt(apiKeyRecord.encryptedKey);
 
+  // Check for a recent completed analysis of the same PR (within 1 hour)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const existing = await db.analysis.findFirst({
+    where: {
+      userId: session.user.id,
+      prOwner: parsed.owner,
+      prRepo: parsed.repo,
+      prNumber: parsed.number,
+      status: 'COMPLETE',
+      completedAt: { gte: oneHourAgo },
+    },
+    orderBy: { completedAt: 'desc' },
+  });
+
+  if (existing) {
+    return NextResponse.json({ id: existing.id, cached: true });
+  }
+
   // Create pending analysis record
   const analysis = await db.analysis.create({
     data: {

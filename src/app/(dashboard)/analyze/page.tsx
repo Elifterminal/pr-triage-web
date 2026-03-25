@@ -88,6 +88,7 @@ export default function AnalyzePage() {
 
   const isProcessing = state !== 'idle' && state !== 'error';
   const step = STEPS[state];
+  const tierLoading = tier === null;
   const canDeep = tier?.limits.deepAnalysis ?? false;
   const atLimit = tier?.usage.remaining === 0;
 
@@ -162,19 +163,24 @@ export default function AnalyzePage() {
                 className={`flex-1 rounded-lg border px-4 py-3 text-left transition ${
                   mode === 'DEEP'
                     ? 'border-primary bg-primary/10'
-                    : canDeep
-                      ? 'border-border hover:border-muted-foreground/30'
-                      : 'border-border opacity-50 cursor-not-allowed'
+                    : tierLoading
+                      ? 'border-border opacity-50 cursor-wait'
+                      : canDeep
+                        ? 'border-border hover:border-muted-foreground/30'
+                        : 'border-border opacity-50 cursor-not-allowed'
                 }`}
+                disabled={tierLoading || !canDeep}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Deep Analysis</span>
                   <Badge variant="info" className="text-xs">Pro</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {canDeep
-                    ? 'Extended context, multi-file reasoning'
-                    : 'Upgrade to Pro to unlock'}
+                  {tierLoading
+                    ? 'Loading...'
+                    : canDeep
+                      ? 'Extended context, multi-file reasoning'
+                      : 'Upgrade to Pro to unlock'}
                 </p>
               </button>
             </div>

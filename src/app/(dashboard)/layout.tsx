@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { auth, signOut } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
+import { NavLink } from '@/components/nav-link';
 
 export default async function DashboardLayout({
   children,
@@ -21,24 +22,9 @@ export default async function DashboardLayout({
               PR Triage
             </Link>
             <div className="flex items-center gap-1">
-              <Link
-                href="/dashboard"
-                className="text-sm px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition"
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/analyze"
-                className="text-sm px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition"
-              >
-                Analyze
-              </Link>
-              <Link
-                href="/settings"
-                className="text-sm px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition"
-              >
-                Settings
-              </Link>
+              <NavLink href="/dashboard">Dashboard</NavLink>
+              <NavLink href="/analyze">Analyze</NavLink>
+              <NavLink href="/settings">Settings</NavLink>
             </div>
           </div>
 

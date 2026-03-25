@@ -175,42 +175,113 @@ function calculatePriority(
 // Action: What the maintainer should do
 // ============================================
 
+// ============================================
+// Signal Hierarchy for Action Determination
+//
+// Score sets the baseline action. Signals adjust it:
+//   Dealbreakers → force IGNORE regardless of score
+//   Red flags    → cap action (can't auto-PRIORITIZE)
+//   Missing essentials → downgrade one level
+//   Strong positives → upgrade one level (within caps)
+// ============================================
+
+interface SignalContext {
+  dimensions: DimensionResult[];
+  riskFlags: RiskFlag[];
+  missingContext: string[];
+  conflictingSignals: string[];
+}
+
+const ACTION_RANK: Action[] = ['CLOSE', 'BATCH', 'REVIEW', 'PRIORITIZE'];
+
+function shiftAction(action: Action, delta: number): Action {
+  if (action === 'NEEDS_HUMAN_JUDGMENT') return action;
+  const idx = ACTION_RANK.indexOf(action);
+  const newIdx = Math.max(0, Math.min(ACTION_RANK.length - 1, idx + delta));
+  return ACTION_RANK[newIdx];
+}
+
 function determineAction(
   compositeScore: number,
   priority: Priority,
   confidence: ConfidenceLevel,
   category: PRCategory,
-  hasConflicts: boolean
+  hasConflicts: boolean,
+  signals: SignalContext
 ): Action {
-  // FIRST: Low scores are definitive. If it scores poorly, we know enough
-  // to say ignore — uncertainty doesn't rescue a bad PR.
-  if (compositeScore < 40) return 'IGNORE';
+  // ── Layer 0: Definitive low scores ──
+  // Bad is bad. Uncertainty doesn't rescue a failing PR.
+  if (compositeScore < 40) return 'CLOSE';
 
-  // Low confidence on code changes in the ambiguous range = needs human judgment
+  // ── Layer 1: Dealbreakers ──
+  // High-severity risk flags override everything.
+  const hasHighRisk = signals.riskFlags.some(r => r.severity === 'high');
+  if (hasHighRisk && compositeScore < 60) return 'CLOSE';
+
+  // ── Layer 2: Trivial categories (handled separately) ──
+  if (['DOCS_ONLY', 'FORMATTING_ONLY', 'COSMETIC_RENAME'].includes(category)) {
+    return compositeScore >= 50 ? 'BATCH' : 'CLOSE';
+  }
+
+  if (category === 'DEPENDENCY_BUMP') {
+    if (compositeScore >= 80) return 'REVIEW'; // Security-relevant dep bump
+    return 'BATCH';
+  }
+
+  // ── Layer 3: Score-based baseline for code changes ──
+  let action: Action;
+  if (compositeScore >= 80) action = 'PRIORITIZE';
+  else if (compositeScore >= 60) action = 'REVIEW';
+  else action = 'BATCH'; // 40-59
+
+  // ── Layer 4: Red flags cap the action ──
+  // High-severity risks or breaking changes → can't auto-PRIORITIZE
+  if (hasHighRisk && action === 'PRIORITIZE') {
+    action = 'REVIEW';
+  }
+
+  // ── Layer 5: Missing essentials downgrade ──
+  // No linked issue + no description = missing critical context
+  const issueFit = signals.dimensions.find(d => d.key === 'issue_fit');
+  const hasNoIssueContext = issueFit?.band === 'INSUFFICIENT_DATA';
+  const testSignal = signals.dimensions.find(d => d.key === 'test_signal');
+  const hasNoTests = testSignal?.band === 'WEAK' || testSignal?.band === 'INSUFFICIENT_DATA';
+
+  // Missing essentials on code changes: downgrade one level
+  if (category === 'CODE_CHANGE' && hasNoIssueContext && hasNoTests) {
+    action = shiftAction(action, -1);
+  }
+
+  // ── Layer 6: Strong positives upgrade ──
+  // All major dimensions STRONG + no risk flags = upgrade
+  const majorDims = signals.dimensions.filter(d =>
+    ['issue_fit', 'substance', 'pattern_alignment', 'scope_match'].includes(d.key)
+  );
+  const allMajorStrong = majorDims.length >= 3 &&
+    majorDims.every(d => d.band === 'STRONG' || d.band === 'MODERATE');
+  const noRiskFlags = signals.riskFlags.length === 0;
+
+  if (allMajorStrong && noRiskFlags && action === 'REVIEW') {
+    action = shiftAction(action, +1);
+  }
+
+  // ── Layer 7: Confidence / conflict overrides ──
+  // Insufficient confidence on code changes → needs human eyes
   if (confidence === 'INSUFFICIENT' && category === 'CODE_CHANGE') {
     return 'NEEDS_HUMAN_JUDGMENT';
   }
 
-  // Conflicts on high-scoring code = needs human judgment
-  if (hasConflicts && compositeScore >= 60 && category === 'CODE_CHANGE') {
-    return 'NEEDS_HUMAN_JUDGMENT';
+  // Conflicting signals with medium-severity risks → human judgment
+  // BUT: if the PR has strong fundamentals (3+ strong/moderate major dims),
+  // the strong signal wins — conflicts are noted but don't override.
+  const hasMediumRisk = signals.riskFlags.some(r => r.severity === 'medium');
+  if (hasConflicts && hasMediumRisk && compositeScore >= 50 && compositeScore < 80) {
+    if (!allMajorStrong) {
+      return 'NEEDS_HUMAN_JUDGMENT';
+    }
   }
 
-  // Trivial categories with high confidence → ignore or batch
-  if (['DOCS_ONLY', 'FORMATTING_ONLY', 'COSMETIC_RENAME'].includes(category)) {
-    return compositeScore >= 50 ? 'BATCH' : 'IGNORE';
-  }
-
-  // Dep bumps
-  if (category === 'DEPENDENCY_BUMP') {
-    if (compositeScore >= 80) return 'REVIEW'; // Security-relevant
-    return 'BATCH';
-  }
-
-  // Code changes: action based on score
-  if (compositeScore >= 80) return 'PRIORITIZE';
-  if (compositeScore >= 60) return 'REVIEW';
-  return 'BATCH';
+  return action;
 }
 
 // ============================================
@@ -219,7 +290,8 @@ function determineAction(
 
 function calculateCompositeScore(
   dimensions: DimensionResult[],
-  riskFlags: RiskFlag[]
+  riskFlags: RiskFlag[],
+  category?: PRCategory
 ): number {
   const scoreable = dimensions.filter(
     (d) => d.band !== 'INSUFFICIENT_DATA'
@@ -235,14 +307,30 @@ function calculateCompositeScore(
     base += BAND_SCORES[dim.band] * normalizedWeight;
   }
 
-  const totalPenalty = riskFlags.reduce((sum, rf) => sum + rf.penalty, 0);
+  // Penalties apply at full weight — severity already determines the base penalty
+  // (high=12, medium=7, low=3). But cap total penalty to avoid score collapse
+  // from stacking many small issues.
+  const rawPenalty = riskFlags.reduce((sum, rf) => sum + rf.penalty, 0);
+  const totalPenalty = Math.min(rawPenalty, 25); // Cap at 25 points
   base -= totalPenalty;
 
   if (checkMajorConflict(dimensions)) {
     base -= 5;
   }
 
-  return Math.max(0, Math.min(100, Math.round(base)));
+  // Score floors by threat level:
+  //   - PRs with high-severity risks can hit 0 (genuinely harmful)
+  //   - Everything else floors at 8 (bad but not dangerous)
+  //   - Trivial categories (docs, formatting) floor at 12 (low-effort, not malicious)
+  const hasHighRisk = riskFlags.some(r => r.severity === 'high');
+  const isTrivialCategory = category && ['DOCS_ONLY', 'FORMATTING_ONLY', 'COSMETIC_RENAME'].includes(category);
+
+  let floor = 0;
+  if (!hasHighRisk) {
+    floor = isTrivialCategory ? 12 : 8;
+  }
+
+  return Math.max(floor, Math.min(100, Math.round(base)));
 }
 
 function checkMajorConflict(dimensions: DimensionResult[]): boolean {
@@ -310,19 +398,38 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
     }
   }
 
-  // Parse risk flags
-  const riskFlags: RiskFlag[] = (parsed.risk_flags_detail || []).map((rf) => ({
-    flag: String(rf.flag),
-    severity: parseSeverity(rf.severity),
-    penalty: rf.severity === 'high' ? 12 : rf.severity === 'medium' ? 7 : 3,
-    evidence: String(rf.evidence || ''),
-  }));
+  // Parse risk flags with severity normalization.
+  // LLMs tend to over-classify process/hygiene issues (missing description,
+  // no tests, unfilled template) as "high" severity. True high severity is
+  // reserved for security vulnerabilities, data loss, or harmful code changes.
+  const HYGIENE_PATTERNS = [
+    /description/i, /template/i, /unfilled/i, /empty.*body/i,
+    /no.*test/i, /missing.*test/i, /no.*issue/i, /no.*linked/i,
+    /documentation/i, /incomplete.*pr/i, /pr.*description/i,
+  ];
 
-  // Calculate composite score
-  const compositeScore = calculateCompositeScore(dimensions, riskFlags);
+  const riskFlags: RiskFlag[] = (parsed.risk_flags_detail || []).map((rf) => {
+    let severity = parseSeverity(rf.severity);
+    const flagText = `${rf.flag} ${rf.evidence}`;
 
-  // Detect PR category
+    // Cap hygiene/process issues at medium — they're not dangerous, just sloppy
+    if (severity === 'high' && HYGIENE_PATTERNS.some(p => p.test(flagText))) {
+      severity = 'medium';
+    }
+
+    return {
+      flag: String(rf.flag),
+      severity,
+      penalty: severity === 'high' ? 12 : severity === 'medium' ? 7 : 3,
+      evidence: String(rf.evidence || ''),
+    };
+  });
+
+  // Detect PR category first (needed for score floor)
   const prCategory = detectPRCategory(dimensions, riskFlags);
+
+  // Calculate composite score (category affects floor)
+  const compositeScore = calculateCompositeScore(dimensions, riskFlags, prCategory);
 
   // Three-axis output: confidence, priority, action
   const hasConflicts = (parsed.conflicting_signals || []).length > 0;
@@ -330,7 +437,13 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
 
   const confidenceLevel = calculateConfidence(dimensions, parsed.missing_context || [], prCategory);
   const priority = calculatePriority(compositeScore, prCategory, hasConflicts || hasMajorConflict);
-  const action = determineAction(compositeScore, priority, confidenceLevel, prCategory, hasConflicts || hasMajorConflict);
+  const signalContext: SignalContext = {
+    dimensions,
+    riskFlags,
+    missingContext: parsed.missing_context || [],
+    conflictingSignals: parsed.conflicting_signals || [],
+  };
+  const action = determineAction(compositeScore, priority, confidenceLevel, prCategory, hasConflicts || hasMajorConflict, signalContext);
 
   return {
     compositeScore,

@@ -48,7 +48,7 @@ export interface RiskFlag {
 // ============================================
 
 export type Action =
-  | 'IGNORE'
+  | 'CLOSE'
   | 'BATCH'
   | 'REVIEW'
   | 'PRIORITIZE'
@@ -60,7 +60,7 @@ export type ConfidenceLevel = 'HIGH' | 'MODERATE' | 'LOW' | 'INSUFFICIENT';
 
 // Kept for backward compat with DB schema string field
 export type Recommendation =
-  | 'IGNORE'
+  | 'CLOSE'
   | 'BATCH'
   | 'REVIEW'
   | 'PRIORITIZE'
