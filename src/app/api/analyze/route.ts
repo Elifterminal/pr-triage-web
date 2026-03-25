@@ -42,12 +42,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  // Count today's analyses for daily limit check
+  // Count today's COMPLETED analyses for daily limit check
+  // Failed analyses don't count against the limit
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayCount = await db.analysis.count({
     where: {
       userId: session.user.id,
+      status: 'COMPLETE',
       createdAt: { gte: todayStart },
     },
   });
@@ -156,9 +158,49 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Return user-friendly error messages
+    const rawMessage = error instanceof Error ? error.message : 'Analysis failed';
+    const friendlyMessage = getFriendlyError(rawMessage);
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Analysis failed' },
+      { error: friendlyMessage },
       { status: 500 }
     );
   }
+}
+
+function getFriendlyError(message: string): string {
+  const lower = message.toLowerCase();
+
+  // API key issues
+  if (lower.includes('authentication') || lower.includes('api key') || lower.includes('unauthorized') || lower.includes('401')) {
+    return 'Your API key appears to be invalid or expired. Please check it in Settings and try again.';
+  }
+  if (lower.includes('rate limit') || lower.includes('429')) {
+    return 'Your API provider rate limit was hit. Please wait a minute and try again.';
+  }
+  if (lower.includes('insufficient') && lower.includes('quota')) {
+    return 'Your API key has run out of credits. Please add credits with your provider or switch to a different key.';
+  }
+
+  // GitHub issues
+  if (lower.includes('not found') && (lower.includes('pr') || lower.includes('pull') || lower.includes('repo'))) {
+    return 'Could not find that pull request. Make sure the URL is correct and the repository is public.';
+  }
+  if (lower.includes('github') && lower.includes('rate')) {
+    return 'GitHub API rate limit reached. Try again in a few minutes.';
+  }
+
+  // LLM response issues
+  if (lower.includes('json') || lower.includes('parse') || lower.includes('unexpected token')) {
+    return 'The AI returned an unexpected response. Please try again — this is usually a one-off issue.';
+  }
+
+  // Network issues
+  if (lower.includes('timeout') || lower.includes('econnrefused') || lower.includes('network')) {
+    return 'Network error connecting to the API. Please check your connection and try again.';
+  }
+
+  // Fallback — don't expose raw internal errors
+  return 'Something went wrong during analysis. Please try again. If the issue persists, check your API key in Settings.';
 }

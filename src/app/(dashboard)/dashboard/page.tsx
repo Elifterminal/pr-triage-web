@@ -99,6 +99,7 @@ export default async function DashboardPage({
     db.analysis.count({
       where: {
         userId: session.user.id,
+        status: 'COMPLETE',
         createdAt: { gte: todayStart },
       },
     }),
