@@ -1,14 +1,18 @@
 # PR Triage
 
-AI-powered pull request evaluation for open source maintainers. Stop reviewing junk PRs.
+AI-powered PR evaluation and automated triage for open source maintainers. The only tool that evaluates the PR against the linked issue — not just the code.
 
-PR Triage reads the diff, checks the linked issue, evaluates code quality in context, and tells you whether a PR is worth your time — in seconds, not hours.
+PR Triage reads the diff, checks the linked issue, evaluates implementation quality in context, and tells you whether a PR is worth your time — in seconds, not hours. Designed to integrate into modern AI-assisted code review workflows.
 
 ## Why PR Triage?
 
-Open source maintainers are drowning in low-quality pull requests. Existing anti-spam tools only check superficial contributor signals (account age, commit history). None of them actually read the code.
+Open source maintainers are drowning in low-quality pull requests. Existing tools review the **code** — they find bugs, flag style issues, detect architectural drift. But none of them answer the question that actually matters for triage:
 
-PR Triage does. It evaluates six dimensions of PR quality using AI, produces a confidence-scored recommendation, and gives you actionable guidance — merge it, review it, batch it for later, or close it.
+> **Does this PR solve the problem it claims to solve?**
+
+PR Triage does. It evaluates six dimensions of PR quality against the linked issue using AI, produces a confidence-scored recommendation, and gives you actionable guidance — prioritize it, review it, batch it for later, or close it.
+
+Other tools tell you if the code is good. PR Triage tells you if the PR is **worth your time**.
 
 **BYOK (Bring Your Own Key)**: You provide your own LLM API key. Your key is encrypted at rest and never shared. Supports Anthropic, OpenAI, OpenRouter, and Gemini.
 
