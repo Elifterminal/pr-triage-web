@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { BatchInput } from '@/components/batch-input';
 
 type AnalysisState = 'idle' | 'validating' | 'fetching' | 'evaluating' | 'done' | 'error';
 
@@ -15,6 +16,7 @@ interface TierInfo {
   limits: {
     dailyAnalyses: number;
     deepAnalysis: boolean;
+    batchAnalysis: boolean;
   };
   usage: {
     todayCount: number;
@@ -35,6 +37,7 @@ export default function AnalyzePage() {
   const router = useRouter();
   const [url, setUrl] = useState('');
   const [mode, setMode] = useState<'QUICK' | 'DEEP'>('QUICK');
+  const [inputMode, setInputMode] = useState<'single' | 'batch'>('single');
   const [state, setState] = useState<AnalysisState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [tier, setTier] = useState<TierInfo | null>(null);
@@ -90,15 +93,36 @@ export default function AnalyzePage() {
   const step = STEPS[state];
   const tierLoading = tier === null;
   const canDeep = tier?.limits.deepAnalysis ?? false;
+  const canBatch = tier?.limits.batchAnalysis ?? false;
   const atLimit = tier?.usage.remaining === 0;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">Analyze a Pull Request</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Paste a GitHub PR URL to get a structured triage assessment.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Analyze a Pull Request</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Paste a GitHub PR URL to get a structured triage assessment.
+          </p>
+        </div>
+        {canBatch && (
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+            <button
+              type="button"
+              onClick={() => setInputMode('single')}
+              className={`px-3 py-1.5 transition ${inputMode === 'single' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Single
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode('batch')}
+              className={`px-3 py-1.5 transition ${inputMode === 'batch' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Batch
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Daily limit warning */}
@@ -120,6 +144,9 @@ export default function AnalyzePage() {
         </Card>
       )}
 
+      {inputMode === 'batch' && canBatch ? (
+        <BatchInput mode={mode} />
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle>PR URL</CardTitle>
@@ -221,6 +248,7 @@ export default function AnalyzePage() {
           </form>
         </CardContent>
       </Card>
+      )}
 
       {/* Tips */}
       <div className="rounded-lg border bg-card p-6 space-y-3">

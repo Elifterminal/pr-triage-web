@@ -51,20 +51,46 @@ model VerificationToken {
 // ============================================
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  plan          String    @default("FREE")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  name             String?
+  email            String?   @unique
+  emailVerified    DateTime?
+  image            String?
+  plan             String    @default("FREE")
+  stripeCustomerId String?   @unique
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  accounts   Account[]
-  sessions   Session[]
-  apiKeys    ApiKey[]
-  analyses   Analysis[]
-  feedback   Feedback[]
+  accounts       Account[]
+  sessions       Session[]
+  apiKeys        ApiKey[]
+  analyses       Analysis[]
+  feedback       Feedback[]
+  subscriptions  Subscription[]
+  apiTokens      ApiToken[]
+  customRule     CustomRule?
+  connectedRepos ConnectedRepo[]
+}
+
+// ============================================
+// Subscriptions (Stripe)
+// ============================================
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String
+  stripeSubscriptionId String   @unique
+  stripePriceId        String
+  status               String   // active, canceled, past_due, incomplete, trialing
+  startDate            DateTime
+  cancelAt             DateTime?
+  cancelAtPeriodEnd    Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ============================================
@@ -102,6 +128,9 @@ model Analysis {
   mode            String   @default("QUICK")
   status          String   @default("PENDING")
 
+  // Sharing
+  shareToken      String?  @unique
+
   // Input snapshot (stored for reproducibility)
   inputData       String?
 
@@ -138,4 +167,57 @@ model Feedback {
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([analysisId, userId])
+}
+
+// ============================================
+// API Tokens (for external API access)
+// ============================================
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  tokenPrefix String
+  label       String
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================
+// Custom Rules (scoring overrides)
+// ============================================
+
+model CustomRule {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  dimensionWeights  Json?
+  minScoreThreshold Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// Connected Repos (auto-analysis)
+// ============================================
+
+model ConnectedRepo {
+  id            String   @id @default(cuid())
+  userId        String
+  owner         String
+  repo          String
+  webhookId     Int?
+  webhookSecret String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, owner, repo])
+  @@index([owner, repo])
 }

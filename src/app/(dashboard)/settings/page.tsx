@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { ApiTokens } from '@/components/api-tokens';
+import { CustomRules } from '@/components/custom-rules';
+import { ConnectedRepos } from '@/components/connected-repos';
 
 interface TierInfo {
   plan: string;
@@ -16,6 +19,8 @@ interface TierInfo {
     connectedRepos: number;
     exportResults: boolean;
     apiAccess: boolean;
+    customRules: boolean;
+    batchAnalysis: boolean;
   };
   usage: {
     todayCount: number;
@@ -52,6 +57,48 @@ export default function SettingsPage() {
 
   // Delete state
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Billing state
+  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+
+  async function handleUpgrade(plan: 'PRO' | 'TEAM') {
+    setUpgrading(plan);
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = { error: text }; }
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error('Checkout error:', res.status, data);
+        alert(`Checkout error (${res.status}): ${data.error || JSON.stringify(data)}`);
+        setUpgrading(null);
+      }
+    } catch (err) {
+      console.error('Checkout fetch error:', err);
+      alert(`Checkout failed: ${err instanceof Error ? err.message : String(err)}`);
+      setUpgrading(null);
+    }
+  }
+
+  async function handleManageBilling() {
+    setBillingLoading(true);
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch {
+      setBillingLoading(false);
+    }
+  }
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -157,7 +204,33 @@ export default function SettingsPage() {
                 )}
               </div>
               {tier.plan === 'FREE' && (
-                <Button size="sm" variant="outline" disabled>Upgrade (coming soon)</Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleUpgrade('PRO')}
+                    disabled={upgrading !== null}
+                  >
+                    {upgrading === 'PRO' ? 'Redirecting...' : 'Upgrade to Pro — $19/mo'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleUpgrade('TEAM')}
+                    disabled={upgrading !== null}
+                  >
+                    {upgrading === 'TEAM' ? 'Redirecting...' : 'Team — $49/mo'}
+                  </Button>
+                </div>
+              )}
+              {tier.plan !== 'FREE' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleManageBilling}
+                  disabled={billingLoading}
+                >
+                  {billingLoading ? 'Loading...' : 'Manage Billing'}
+                </Button>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
@@ -323,6 +396,21 @@ export default function SettingsPage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* API Tokens (TEAM) */}
+      {tier && (
+        <ApiTokens tierAllowed={tier.limits.apiAccess} />
+      )}
+
+      {/* Custom Rules (TEAM) */}
+      {tier && (
+        <CustomRules tierAllowed={tier.limits.customRules} />
+      )}
+
+      {/* Connected Repos (PRO/TEAM) */}
+      {tier && (
+        <ConnectedRepos tierAllowed={tier.limits.connectedRepos > 0} maxRepos={tier.limits.connectedRepos} />
+      )}
 
       {/* Info */}
       <div className="rounded-lg border bg-card p-6 space-y-3">
