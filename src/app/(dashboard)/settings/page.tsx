@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { ApiTokens } from '@/components/api-tokens';
 import { CustomRules } from '@/components/custom-rules';
 import { ConnectedRepos } from '@/components/connected-repos';
+import { TeamMembers } from '@/components/team-members';
+import { DigestSettings } from '@/components/digest-settings';
 
 interface TierInfo {
   plan: string;
@@ -21,6 +23,7 @@ interface TierInfo {
     apiAccess: boolean;
     customRules: boolean;
     batchAnalysis: boolean;
+    teamMembers: number;
   };
   usage: {
     todayCount: number;
@@ -405,6 +408,16 @@ export default function SettingsPage() {
       {/* Custom Rules (TEAM) */}
       {tier && (
         <CustomRules tierAllowed={tier.limits.customRules} />
+      )}
+
+      {/* Digest Settings (PRO/TEAM) */}
+      {tier && (
+        <DigestSettings tierAllowed={tier.plan !== 'FREE'} />
+      )}
+
+      {/* Team Members (TEAM) */}
+      {tier && (
+        <TeamMembers tierAllowed={tier.limits.teamMembers > 0} />
       )}
 
       {/* Connected Repos (PRO/TEAM) */}

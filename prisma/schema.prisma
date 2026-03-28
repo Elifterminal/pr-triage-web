@@ -67,9 +67,12 @@ model User {
   analyses       Analysis[]
   feedback       Feedback[]
   subscriptions  Subscription[]
-  apiTokens      ApiToken[]
-  customRule     CustomRule?
-  connectedRepos ConnectedRepo[]
+  apiTokens        ApiToken[]
+  customRule       CustomRule?
+  connectedRepos   ConnectedRepo[]
+  ownedTeams       Team[]           @relation("TeamOwner")
+  teamMemberships  TeamMember[]
+  digestPreference DigestPreference?
 }
 
 // ============================================
@@ -205,6 +208,57 @@ model CustomRule {
 // ============================================
 // Connected Repos (auto-analysis)
 // ============================================
+
+// ============================================
+// Teams
+// ============================================
+
+model Team {
+  id        String       @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  owner   User         @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members TeamMember[]
+
+  @@index([ownerId])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String?
+  email     String
+  role      String   @default("MEMBER") // OWNER, ADMIN, MEMBER
+  status    String   @default("PENDING") // PENDING, ACTIVE
+  inviteToken String? @unique
+  createdAt DateTime @default(now())
+
+  team Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([teamId, email])
+  @@index([userId])
+  @@index([inviteToken])
+}
+
+// ============================================
+// Digest Preferences
+// ============================================
+
+model DigestPreference {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  enabled   Boolean  @default(true)
+  frequency String   @default("DAILY") // DAILY, WEEKLY
+  lastSentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 
 model ConnectedRepo {
   id            String   @id @default(cuid())
