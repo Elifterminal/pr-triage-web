@@ -2,14 +2,16 @@ import { LLMProvider, PRInputData, ProviderType, DEFAULT_MODELS, TriageResult } 
 import { AnthropicProvider } from './providers/anthropic';
 import { OpenAIProvider } from './providers/openai';
 import { OpenRouterProvider } from './providers/openrouter';
-import { SYSTEM_PROMPT, buildUserPrompt } from './prompts';
+import { SYSTEM_PROMPT, DEEP_SYSTEM_PROMPT, buildUserPrompt, buildDeepUserPrompt } from './prompts';
 import { parseAndScoreLLMResponse } from './scoring';
 
 export interface TriageOptions {
   apiKey: string;
   provider: ProviderType;
   model?: string;
+  mode?: 'QUICK' | 'DEEP';
   maxDiffChars?: number;
+  customWeights?: Record<string, number>;
 }
 
 function createProvider(options: TriageOptions): LLMProvider {
@@ -31,14 +33,19 @@ export async function runTriage(
   input: PRInputData,
   options: TriageOptions
 ): Promise<TriageResult> {
-  const maxDiffChars = options.maxDiffChars || 12000;
+  const isDeep = options.mode === 'DEEP';
+  const maxDiffChars = options.maxDiffChars || (isDeep ? 50000 : 12000);
   const provider = createProvider(options);
-  const userPrompt = buildUserPrompt(input, maxDiffChars);
 
-  const raw = await provider.evaluate(SYSTEM_PROMPT, userPrompt);
+  const systemPrompt = isDeep ? DEEP_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const userPrompt = isDeep
+    ? buildDeepUserPrompt(input, maxDiffChars)
+    : buildUserPrompt(input, maxDiffChars);
+
+  const raw = await provider.evaluate(systemPrompt, userPrompt);
 
   try {
-    return parseAndScoreLLMResponse(raw);
+    return parseAndScoreLLMResponse(raw, options.customWeights as Record<string, number> | undefined);
   } catch (error) {
     // If LLM response can't be parsed, return a degraded result
     return {

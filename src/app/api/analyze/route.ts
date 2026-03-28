@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { decrypt } from '@/lib/encryption';
 import { parsePRUrl, fetchPRData } from '@/engine/github';
 import { runTriage } from '@/engine/triage';
 import { ProviderType } from '@/engine/types';
 import { canPerformAnalysis, getTierLimits } from '@/lib/tiers';
+import { authenticateRequest } from '@/lib/api-auth';
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authenticateRequest(req);
+  if (!authResult) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Token auth requires apiAccess tier gate
+  if (authResult.via === 'token') {
+    const tokenUser = await db.user.findUnique({
+      where: { id: authResult.userId },
+      select: { plan: true },
+    });
+    if (!tokenUser || !getTierLimits(tokenUser.plan).apiAccess) {
+      return NextResponse.json({ error: 'API access requires Team plan' }, { status: 403 });
+    }
   }
 
   const body = await req.json();
@@ -34,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   // Check analysis limits
   const user = await db.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: authResult.userId },
     include: { apiKeys: true },
   });
 
@@ -48,7 +59,7 @@ export async function POST(req: NextRequest) {
   todayStart.setHours(0, 0, 0, 0);
   const todayCount = await db.analysis.count({
     where: {
-      userId: session.user.id,
+      userId: authResult.userId,
       status: 'COMPLETE',
       createdAt: { gte: todayStart },
     },
@@ -79,7 +90,7 @@ export async function POST(req: NextRequest) {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
   const existing = await db.analysis.findFirst({
     where: {
-      userId: session.user.id,
+      userId: authResult.userId,
       prOwner: parsed.owner,
       prRepo: parsed.repo,
       prNumber: parsed.number,
@@ -96,7 +107,7 @@ export async function POST(req: NextRequest) {
   // Create pending analysis record
   const analysis = await db.analysis.create({
     data: {
-      userId: session.user.id,
+      userId: authResult.userId,
       prUrl,
       prOwner: parsed.owner,
       prRepo: parsed.repo,
@@ -110,7 +121,7 @@ export async function POST(req: NextRequest) {
     // Fetch PR data from GitHub
     // Use the user's GitHub access token if available
     const account = await db.account.findFirst({
-      where: { userId: session.user.id, provider: 'github' },
+      where: { userId: authResult.userId, provider: 'github' },
     });
     const githubToken = account?.access_token || undefined;
 
@@ -121,10 +132,18 @@ export async function POST(req: NextRequest) {
       githubToken
     );
 
+    // Fetch custom weights if user has them
+    const customRule = await db.customRule.findUnique({
+      where: { userId: authResult.userId },
+      select: { dimensionWeights: true },
+    });
+
     // Run triage
     const result = await runTriage(prData, {
       apiKey,
       provider: apiKeyRecord.provider as ProviderType,
+      mode: analysis.mode as 'QUICK' | 'DEEP',
+      customWeights: customRule?.dimensionWeights as Record<string, number> | undefined,
     });
 
     // Update analysis with results

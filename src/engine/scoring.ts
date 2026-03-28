@@ -5,9 +5,12 @@ import {
   ConfidenceLevel,
   DimensionKey,
   DimensionResult,
+  FileAnalysis,
+  MaintainabilityAssessment,
   PRCategory,
   Priority,
   RiskFlag,
+  SecurityReview,
   TriageResult,
 } from './types';
 
@@ -363,7 +366,10 @@ function checkMajorConflict(dimensions: DimensionResult[]): boolean {
 // Main Parser
 // ============================================
 
-export function parseAndScoreLLMResponse(raw: string): TriageResult {
+export function parseAndScoreLLMResponse(
+  raw: string,
+  customWeights?: Partial<Record<DimensionKey, number>>
+): TriageResult {
   let jsonStr = raw.trim();
   const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
@@ -384,6 +390,11 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
     'scope_match', 'test_signal', 'risk_flags',
   ];
 
+  // Merge custom weights with defaults
+  const weights = customWeights
+    ? { ...DIMENSION_WEIGHTS, ...customWeights }
+    : DIMENSION_WEIGHTS;
+
   for (const key of dimensionKeys) {
     const dim = parsed.dimensions[key];
     if (dim) {
@@ -391,7 +402,7 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
         name: DIMENSION_NAMES[key],
         key,
         band: parseBand(dim.band),
-        weight: DIMENSION_WEIGHTS[key],
+        weight: weights[key],
         evidence: Array.isArray(dim.evidence) ? dim.evidence : [],
         reasoning: String(dim.reasoning || ''),
       });
@@ -445,6 +456,42 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
   };
   const action = determineAction(compositeScore, priority, confidenceLevel, prCategory, hasConflicts || hasMajorConflict, signalContext);
 
+  // Deep Analysis fields (optional — only present in DEEP mode)
+  const rawParsed = parsed as RawLLMResponse & {
+    file_analysis?: Array<{ filename: string; purpose: string; quality: string; notes: string }>;
+    security_review?: { risk_level: string; findings: string[] };
+    maintainability?: { assessment: string; reasoning: string };
+  };
+
+  const fileAnalysis: FileAnalysis[] | undefined = rawParsed.file_analysis
+    ? rawParsed.file_analysis.map((f) => ({
+        filename: String(f.filename || ''),
+        purpose: String(f.purpose || ''),
+        quality: (['GOOD', 'ACCEPTABLE', 'CONCERNING'].includes(f.quality?.toUpperCase())
+          ? f.quality.toUpperCase()
+          : 'ACCEPTABLE') as FileAnalysis['quality'],
+        notes: String(f.notes || ''),
+      }))
+    : undefined;
+
+  const securityReview: SecurityReview | undefined = rawParsed.security_review
+    ? {
+        risk_level: (['NONE', 'LOW', 'MEDIUM', 'HIGH'].includes(rawParsed.security_review.risk_level?.toUpperCase())
+          ? rawParsed.security_review.risk_level.toUpperCase()
+          : 'LOW') as SecurityReview['risk_level'],
+        findings: (rawParsed.security_review.findings || []).map(String),
+      }
+    : undefined;
+
+  const maintainability: MaintainabilityAssessment | undefined = rawParsed.maintainability
+    ? {
+        assessment: (['IMPROVES', 'NEUTRAL', 'DEGRADES'].includes(rawParsed.maintainability.assessment?.toUpperCase())
+          ? rawParsed.maintainability.assessment.toUpperCase()
+          : 'NEUTRAL') as MaintainabilityAssessment['assessment'],
+        reasoning: String(rawParsed.maintainability.reasoning || ''),
+      }
+    : undefined;
+
   return {
     compositeScore,
     confidenceLevel,
@@ -461,5 +508,8 @@ export function parseAndScoreLLMResponse(raw: string): TriageResult {
     whatToVerify: (parsed.what_to_verify || []).map(String),
     strengths: (parsed.strengths || []).map(String),
     concerns: (parsed.concerns || []).map(String),
+    ...(fileAnalysis && { fileAnalysis }),
+    ...(securityReview && { securityReview }),
+    ...(maintainability && { maintainability }),
   };
 }

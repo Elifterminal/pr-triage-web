@@ -12,6 +12,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CopySummary } from '@/components/copy-summary';
+import { ExportButton } from '@/components/export-button';
+import { ShareButton } from '@/components/share-button';
+import { getTierLimits } from '@/lib/tiers';
 import type { TriageResult } from '@/engine/types';
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -41,15 +44,22 @@ export default async function AnalysisDetailPage({
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
 
-  const analysis = await db.analysis.findUnique({
-    where: { id: params.id },
-    include: {
-      feedback: {
-        where: { userId: session.user.id },
-        select: { feedbackType: true },
+  const [analysis, user] = await Promise.all([
+    db.analysis.findUnique({
+      where: { id: params.id },
+      include: {
+        feedback: {
+          where: { userId: session.user.id },
+          select: { feedbackType: true },
+        },
       },
-    },
-  });
+    }),
+    db.user.findUnique({
+      where: { id: session.user.id },
+      select: { plan: true },
+    }),
+  ]);
+  const tierLimits = getTierLimits(user?.plan || 'FREE');
 
   if (!analysis || analysis.userId !== session.user.id) {
     notFound();
@@ -150,6 +160,15 @@ export default async function AnalysisDetailPage({
               prUrl={analysis.prUrl}
             />
           )}
+          <ExportButton
+            analysisId={analysis.id}
+            tierAllowed={tierLimits.exportResults}
+          />
+          <ShareButton
+            analysisId={analysis.id}
+            existingShareToken={analysis.shareToken}
+            tierAllowed={tierLimits.shareableLinks}
+          />
           <a
             href={analysis.prUrl}
             target="_blank"
@@ -296,6 +315,111 @@ export default async function AnalysisDetailPage({
               />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Deep Analysis: File-by-File Analysis */}
+      {result?.fileAnalysis && result.fileAnalysis.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">File-by-File Analysis</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {result.fileAnalysis.map((file, i) => (
+                <div key={i} className="border border-border rounded-md p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <code className="text-xs font-mono">{file.filename}</code>
+                    <Badge
+                      variant={
+                        file.quality === 'GOOD'
+                          ? 'success'
+                          : file.quality === 'CONCERNING'
+                          ? 'danger'
+                          : 'secondary'
+                      }
+                      className="text-xs"
+                    >
+                      {file.quality}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{file.purpose}</p>
+                  {file.notes && (
+                    <p className="text-xs text-muted-foreground/70 mt-1">{file.notes}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Deep Analysis: Security Review & Maintainability */}
+      {(result?.securityReview || result?.maintainability) && (
+        <div className="grid md:grid-cols-2 gap-4">
+          {result?.securityReview && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Security Review</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-medium">Risk Level:</span>
+                  <Badge
+                    variant={
+                      result.securityReview.risk_level === 'NONE'
+                        ? 'success'
+                        : result.securityReview.risk_level === 'HIGH'
+                        ? 'danger'
+                        : result.securityReview.risk_level === 'MEDIUM'
+                        ? 'warning'
+                        : 'info'
+                    }
+                  >
+                    {result.securityReview.risk_level}
+                  </Badge>
+                </div>
+                {result.securityReview.findings.length > 0 && (
+                  <ul className="space-y-1 text-sm text-muted-foreground">
+                    {result.securityReview.findings.map((f, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="mt-0.5">&#8226;</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {result.securityReview.findings.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No security findings.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          {result?.maintainability && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Maintainability Impact</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge
+                    variant={
+                      result.maintainability.assessment === 'IMPROVES'
+                        ? 'success'
+                        : result.maintainability.assessment === 'DEGRADES'
+                        ? 'danger'
+                        : 'secondary'
+                    }
+                  >
+                    {result.maintainability.assessment}
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {result.maintainability.reasoning}
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 

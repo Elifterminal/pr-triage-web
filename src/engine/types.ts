@@ -74,6 +74,23 @@ export type PRCategory =
   | 'COSMETIC_RENAME'
   | 'CODE_CHANGE';
 
+export interface FileAnalysis {
+  filename: string;
+  purpose: string;
+  quality: 'GOOD' | 'ACCEPTABLE' | 'CONCERNING';
+  notes: string;
+}
+
+export interface SecurityReview {
+  risk_level: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
+  findings: string[];
+}
+
+export interface MaintainabilityAssessment {
+  assessment: 'IMPROVES' | 'NEUTRAL' | 'DEGRADES';
+  reasoning: string;
+}
+
 export interface TriageResult {
   compositeScore: number;
   confidenceLevel: ConfidenceLevel;
@@ -90,6 +107,10 @@ export interface TriageResult {
   whatToVerify: string[];
   strengths: string[];
   concerns: string[];
+  // Deep Analysis only
+  fileAnalysis?: FileAnalysis[];
+  securityReview?: SecurityReview;
+  maintainability?: MaintainabilityAssessment;
 }
 
 // ============================================
